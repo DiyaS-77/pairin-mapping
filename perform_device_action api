@@ -1,0 +1,57 @@
+#perform_device_action 
+device_action_map = {
+    "pair": {
+        "method": "pair",
+        "success": "Device paired successfully.",
+        "failure": "Failed to pair device.",
+        "post_action": "add_paired_device_to_list",
+        "initial_action": "start_pairing_timeout",
+        "final_action": "cancel_pairing_timeout",
+        "handler": "add_paired_device_to_list"
+    },
+    "connect": {
+        "method": "connect",
+        "success": "Device connected successfully.",
+        "failure": "Failed to connect device.",
+        "post_action": "load_device_profile_tabs",
+        "final_action": "load_device_profile_tabs",
+    },
+    "disconnect": {
+        "method": "disconnect",
+        "success": "Device disconnected successfully.",
+        "failure": "Failed to disconnect device.",
+        "post_action": "load_device_profile_tabs",
+        "final_action": "load_device_profile_tabs",
+    },
+    "unpair": {
+        "method": "unpair_device",
+        "success": "Device unpaired successfully.",
+        "failure": "Failed to unpair device.",
+        "post_action": "remove_device_from_list",
+        "handler": "remove_device_from_list"
+    }
+}
+
+
+def perform_device_action(self, bluetooth_action, device_address, load_profiles):
+    """Execute a Bluetooth operation and update UI (fully mapping-driven)."""
+    device_action = constants.device_action_map.get(bluetooth_action)
+    if not device_action:
+        self.log.error("Invalid Bluetooth action: %s", bluetooth_action)
+        return
+    self.log.info("Starting '%s' on %s", bluetooth_action, device_address)
+    device_method = getattr(self.bluetooth_device_manager, device_action["method"])
+    action_handler = getattr(self, device_action["post_action"])
+    initial_action = getattr(self, device_action["initial_action"], lambda addr: None) if device_action.get("initial_action") else lambda addr: None
+    final_action = getattr(self, device_action["final_action"], lambda addr, success: None) if device_action.get("final_action") else lambda addr, success: None
+    handler = getattr(self, device_action["handler"], lambda addr, success: None) if device_action.get("handler") else lambda addr, success: None
+    initial_action(device_address)
+    result = device_method(device_address)
+    final_action(device_address, result)
+    if device_action.get("load_profiles") and load_profiles:
+        action_handler(device_address)
+    handler(device_address, result)
+    message = device_action["success"] if result else device_action["failure"]
+    popup = QMessageBox.information if result else QMessageBox.warning
+    popup(self, bluetooth_action.capitalize(), f"{device_address}: {message}")
+    self.log.info("%s completed for %s (Status: %s)", bluetooth_action, device_address, "Success" if result else "Failure")
