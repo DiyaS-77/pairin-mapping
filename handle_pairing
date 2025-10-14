@@ -1,0 +1,111 @@
+from PyQt6.QtWidgets import QMessageBox, QInputDialog
+
+pairing_request_map = {
+    "DisplayPinCode": {
+        "title": "PIN Display",
+        "message": "Enter this PIN on the device: {passkey}",
+        "type": "display",
+        "post_action": "add_paired_device"
+    },
+    "RequestPinCode": {
+        "title": "PIN Input Required",
+        "message": "Enter the PIN to pair with {device_address}:",
+        "type": "input_text",
+        "post_action": "add_paired_device"
+    },
+    "RequestPasskey": {
+        "title": "Passkey Input Required",
+        "message": "Enter the passkey to pair with {device_address}:",
+        "type": "input_int",
+        "post_action": "add_paired_device"
+    },
+    "RequestConfirmation": {
+        "title": "Pairing Confirmation",
+        "message": "Does the passkey {passkey} match on {device_address}?",
+        "type": "confirm",
+        "post_action": "add_paired_device"
+    },
+    "AuthorizeService": {
+        "title": "Authorize Connection",
+        "message": "Allow {device_address} to connect to this service?",
+        "type": "authorize",
+        "post_action": "add_connected_device"
+    },
+    "Cancel": {
+        "title": "Pairing Cancelled",
+        "message": "Pairing cancelled for {device_address}.",
+        "type": "cancel"
+    },
+}
+
+user_interaction_map = {
+    "input_pin": lambda self, title, message: QInputDialog.getText(self, title, message),
+    "input_passkey": lambda self, title, message: QInputDialog.getInt(self, title, message),
+    "confirm": lambda self, title, message: (QMessageBox.question(self, title, message), True),
+    "authorize": lambda self, title, message: (QMessageBox.question(self, title, message), True),
+    "display": lambda self, title, message: (QMessageBox.information(self, title, message), True),
+    "cancel": lambda self, title, message: (QMessageBox.warning(self, title, message), False),
+}
+
+post_action_map = {
+    "add_paired_device": lambda self, device_address: self.add_paired_device_to_list(device_address),
+    "add_connected_device": lambda self, device_address: self.add_connected_device_to_list(device_address),
+}
+
+response_handler_map = {
+    "input_pin": lambda self, user_input, confirmed, device_address, post_action_key: (
+        post_action_map[post_action_key](self, device_address)
+        if confirmed and user_input
+        else QMessageBox.warning(self, "Cancelled", f"PIN entry cancelled for {device_address}.")
+    ),
+
+    "input_passkey": lambda self, user_input, confirmed, device_address, post_action_key: (
+        QMessageBox.information(self, "Pairing Successful", f"{device_address} paired successfully.")
+        or post_action_map[post_action_key](self, device_address)
+        if confirmed
+        else QMessageBox.warning(self, "Cancelled", f"Passkey entry cancelled for {device_address}.")
+    ),
+
+    "confirm": lambda self, user_response, confirmed, device_address, post_action_key: (
+        QMessageBox.information(self, "Pairing Successful", f"{device_address} was paired.")
+        or post_action_map[post_action_key](self, device_address)
+        if user_response == QMessageBox.StandardButton.Yes
+        else QMessageBox.information(self, "Pairing Failed", f"Pairing failed for {device_address}.")
+    ),
+
+    "authorize": lambda self, user_response, confirmed, device_address, post_action_key: (
+        QMessageBox.information(self, "Connection Successful", f"{device_address} connected successfully.")
+        or post_action_map[post_action_key](self, device_address)
+        if user_response == QMessageBox.StandardButton.Yes
+        else QMessageBox.warning(self, "Connection Denied", f"Connection denied for {device_address}.")
+    ),
+
+    "display": lambda self, _, confirmed, device_address, post_action_key: (
+        post_action_map.get(post_action_key, lambda self_ref, addr: None)(self, device_address)
+    ),
+
+    "cancel": lambda self, _, confirmed, device_address, post_action_key: (
+        QMessageBox.warning(self, "Cancelled", f"Pairing with {device_address} was cancelled.")
+    ),
+}
+
+
+def handle_pairing_request(self, request_type, device_path, uuid=None, passkey=None):
+    self.log.info(f"Handling pairing request: {request_type} for {device_path}")
+    device_address = device_path.split("dev_")[-1].replace("_", ":")
+    if self.selected_capability == "NoInputNoOutput" and self.bluetooth_device_manager.is_device_paired(device_address):
+        self.add_paired_device_to_list(device_address)
+        return
+    pairing_config = constants.pairing_request_map.get(request_type)
+    if not pairing_config:
+        self.log.warning(f"Unknown pairing request type: {request_type}")
+        return
+    title = pairing_config["title"]
+    message = pairing_config["message"].format(device_address=device_address, uuid=uuid, passkey=passkey)
+    interaction_type = pairing_config["type"]
+    post_action_key = pairing_config.get("post_action")
+    show_user_prompt = constants.user_interaction_map.get(interaction_type)
+    user_response, confirmed = show_user_prompt(self, title, message)
+
+    handle_response = constants.response_handler_map.get(interaction_type)
+    handle_response(self, user_response, confirmed, device_address, post_action_key)
