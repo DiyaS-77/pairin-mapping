@@ -1,0 +1,50 @@
+from PyQt6.QtWidgets import QMessageBox, QInputDialog
+from constants import pairing_request_map
+
+def handle_pairing_request(self, request_type, device_path, uuid=None, passkey=None):
+    self.log.info(f"Handling pairing request: {request_type} for {device_path}")
+    device_address = device_path.split("dev_")[-1].replace("_", ":")
+
+    # Auto-handle NoInputNoOutput
+    if self.selected_capability == "NoInputNoOutput" and self.bluetooth_device_manager.is_device_paired(device_address):
+        self.add_paired_device_to_list(device_address)
+        return
+
+    config = pairing_request_map.get(request_type)
+    if not config:
+        self.log.warning(f"Unknown pairing request type: {request_type}")
+        return
+
+    title = config["title"]
+    message = config["message"].format(device_address=device_address, uuid=uuid, passkey=passkey)
+    interaction_type = config["type"]
+    post_action_key = config.get("post_action")
+
+    # --- Dispatch maps ---
+    ui_dispatch = {
+        "input_text": lambda: QInputDialog.getText(self, title, message),
+        "input_int": lambda: QInputDialog.getInt(self, title, message),
+        "confirm": lambda: QMessageBox.question(self, title, message, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No),
+        "authorize": lambda: QMessageBox.question(self, title, message, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No),
+        "display": lambda: QMessageBox.information(self, title, message),
+        "cancel": lambda: QMessageBox.warning(self, title, message)
+    }
+
+    post_dispatch = {
+        "add_paired_device": lambda: self.add_paired_device_to_list(device_address),
+        "add_connected_device": lambda: self.add_connected_device_to_list(device_address),
+        None: lambda: None
+    }
+
+    response_dispatch = {
+        "input_text": lambda result: post_dispatch[post_action_key]() if result and result[1] else QMessageBox.warning(self, "Cancelled", f"PIN entry cancelled for {device_address}"),
+        "input_int": lambda result: post_dispatch[post_action_key]() if result and result[1] else QMessageBox.warning(self, "Cancelled", f"Passkey entry cancelled for {device_address}"),
+        "confirm": lambda result: post_dispatch[post_action_key]() if result == QMessageBox.StandardButton.Yes else QMessageBox.information(self, "Pairing Failed", f"Pairing failed for {device_address}"),
+        "authorize": lambda result: post_dispatch[post_action_key]() if result == QMessageBox.StandardButton.Yes else QMessageBox.warning(self, "Connection Denied", f"Connection denied for {device_address}"),
+        "display": lambda _: post_dispatch[post_action_key](),
+        "cancel": lambda _: None
+    }
+
+    # --- Run ---
+    result = ui_dispatch[interaction_type]()
+    response_dispatch[interaction_type](result)
