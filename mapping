@@ -1,0 +1,78 @@
+pairing_handlers = {
+    "pin": lambda self, device_address, uuid=None, passkey=None: {
+        "dialog": lambda: QInputDialog.getText(self, "Pairing Request",
+                                               f"Enter PIN for device {device_address}:"),
+        "process_result": lambda result: result[0] if result[1] and result[0] else
+            (self.log.info(f"User cancelled or provided no PIN for device {device_address}"), None)[1]
+        # If accepted and PIN provided, return PIN (result[0])
+        # Else log and return None (index [1] is None here)
+    },
+
+    "passkey": lambda self, device_address, uuid=None, passkey=None: {
+        "dialog": lambda: QInputDialog.getInt(self, "Pairing Request",
+                                              f"Enter passkey for device {device_address}:"),
+        "process_result": lambda result:
+            # If accepted, show success, add device, return passkey (index 2)
+            (QMessageBox.information(self, "Pairing Successful", f"{device_address} was paired."),
+             self.add_paired_device_to_list(device_address), result[0])[2] if result[1] else
+            # Else log and return False (index 1)
+            (self.log.info(f"User cancelled passkey input for device {device_address}"), False)[1]
+    },
+
+    "confirm": lambda self, device_address, uuid=None, passkey=None: {
+        "dialog": lambda: QMessageBox.question(
+            self, "Confirm Pairing",
+            f"Device {device_address} requests to pair with passkey: {uuid}\nAccept?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No),
+        "process_result": lambda result: (
+            # If user accepted, show success, add device, return True (index 2)
+            (QMessageBox.information(self, "Pairing Successful", f"{device_address} was paired."),
+             self.add_paired_device_to_list(device_address), True)[2]
+            if result == QMessageBox.StandardButton.Yes
+            else
+            # Else show failure, log, return False (index 2)
+            (QMessageBox.information(self, "Pairing Failed", f"Pairing with {device_address} failed."),
+             self.log.info("User rejected pairing confirmation request"), False)[2])
+    },
+
+    "authorize": lambda self, device_address, uuid=None, passkey=None: {
+        "dialog": lambda: QMessageBox.question(
+            self, "Authorize Service",
+            f"Device {device_address} wants to use service {uuid}\nAllow?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No),
+        "process_result": lambda result: (
+            # If accepted, show connection success and return True (index 1)
+            (QMessageBox.information(self, "Connection Successful", f"{device_address} was connected."), True)[1]
+            if result == QMessageBox.StandardButton.Yes
+            else
+            # Else log, disconnect, return False (index 2)
+            (self.log.warning(f"User denied service authorization for device {device_address}"),
+             self.bluetooth_device_manager.disconnect(device_address), False)[2])
+    },
+
+    "display_pin": lambda self, device_address, uuid=None, passkey=None: {
+        "dialog": lambda: QMessageBox.information(self, "Display PIN",
+                                                  f"Enter this PIN on {device_address}: {uuid}"),
+        "process_result": lambda result: QTimer.singleShot(5000, lambda: (
+            self.add_paired_device_to_list(device_address)
+            if self.bluetooth_device_manager.is_device_paired(device_address)
+            else QMessageBox.warning(self, "Pairing Failed", f"Pairing with {device_address} did not complete.")
+        ))
+    },
+
+    "display_passkey": lambda self, device_address, uuid=None, passkey=None: {
+        "dialog": lambda: QMessageBox.information(self, "Display Passkey",
+                                                  f"Enter this passkey on {device_address}: {passkey}"),
+        "process_result": lambda result: QTimer.singleShot(5000, lambda: (
+            self.add_paired_device_to_list(device_address)
+            if self.bluetooth_device_manager.is_device_paired(device_address)
+            else QMessageBox.warning(self, "Pairing Failed", f"Pairing with {device_address} did not complete.")
+        ))
+    },
+
+    "cancel": lambda self, device_address, uuid=None, passkey=None: {
+        "dialog": lambda: QMessageBox.warning(self, "Pairing Cancelled",
+                                              f"Pairing with {device_address} was cancelled."),
+        "process_result": lambda result: None
+    }
+}
